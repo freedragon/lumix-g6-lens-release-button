@@ -1,8 +1,8 @@
 # Lumix G6 lens-release button: first-fit prototype
 
 This is an **approximate replacement**, not a verified factory reproduction.
-It uses the owner's five photographs in `photos/`, rather than copying the
-different VGU0P89 part shown in the retailer's listing.
+It uses the owner's five reference photographs (not included in this repository),
+rather than copying the different VGU0P89 part shown in the retailer's listing.
 
 ## Preview
 
