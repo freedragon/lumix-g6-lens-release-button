@@ -4,7 +4,7 @@ from html import escape
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
-from create_button import Dimensions, check_shape, rear_edge_y
+from create_button import Dimensions, check_shape, rear_edge_y, wireframe_polylines
 
 import Part
 
@@ -15,12 +15,12 @@ SCALE = 48
 class Drawing:
     def __init__(self):
         self.elements = [
-            '<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1740" '
-            'viewBox="0 0 1800 1740">',
+            '<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1840" '
+            'viewBox="0 0 1800 1840">',
             '<defs><marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" '
             'markerWidth="6" markerHeight="6" orient="auto-start-reverse">'
             '<path d="M 0 0 L 10 5 L 0 10 z" fill="#1769a0"/></marker></defs>',
-            '<rect width="1800" height="1660" fill="white"/>',
+            '<rect width="1800" height="1840" fill="white"/>',
             '<g font-family="sans-serif" font-size="17" fill="#183047">',
         ]
 
@@ -53,10 +53,7 @@ class Drawing:
                   color="#1769a0", anchor="middle", rotation=-90)
 
     def geometry(self, shape, project):
-        for edge in shape.Edges:
-            points = [project(point) for point in edge.discretize(Deflection=0.008)]
-            if max(abs(x - points[0][0]) + abs(y - points[0][1]) for x, y in points) < 0.001:
-                continue
+        for points in wireframe_polylines(shape, project):
             coordinates = " ".join(f"{x:.3f},{y:.3f}" for x, y in points)
             self.elements.append(
                 f'<polyline points="{coordinates}" fill="none" stroke="#293e50" '
@@ -79,7 +76,7 @@ def main():
     drawing.text(40, 42, "LUMIX G6 LENS-RELEASE BUTTON - DIMENSION CHECK DRAWING", 27)
     drawing.text(40, 73, "All dimensions in mm. Separate drawing; original preview and CAD exports are unchanged.", 18)
     drawing.text(40, 101, "Orthographic wireframes include hidden edges. Blue: dimensions; orange: unmeasured trial values.", 17)
-    drawing.line((900, 120), (900, 1610))
+    drawing.line((900, 120), (900, 1710))
     drawing.line((30, 790), (1770, 790))
 
     half = d.face_width / 2
@@ -102,6 +99,9 @@ def main():
                        plan(shell_half, rear_y + d.shell_height), 214, fmt(d.shell_width))
     drawing.vertical(plan(-half, 0), plan(0, d.height), 80, fmt(d.height))
     drawing.vertical(plan(-half, 0), plan(-half, d.side_height), 125, fmt(d.side_height))
+    drawing.horizontal(plan(-d.pin_diameter / 2, d.pin_center_y),
+                       plan(d.pin_diameter / 2, d.pin_center_y), 320,
+                       f"DIA {fmt(d.pin_diameter)} PIN")
     drawing.vertical(plan(d.wing_span / 2, wing_rear),
                      plan(d.wing_span / 2, wing_front), 755, f"{fmt(d.wing_height)} WING")
     drawing.vertical(plan(stem_middle, rear_edge_y(d, stem_middle)),
@@ -125,7 +125,8 @@ def main():
     drawing.geometry(shape, lambda point: elevation(point.x, point.z))
     drawing.horizontal(elevation(-d.wing_span / 2, d.depth), elevation(d.wing_span / 2, d.depth),
                        172, f"{fmt(d.wing_span)} TOP WINGS")
-    drawing.vertical(elevation(half, 0), elevation(half, d.depth), 1730, fmt(d.depth))
+    drawing.vertical(elevation(half, 0), elevation(half, d.overall_depth), 1730,
+                     f"{fmt(d.overall_depth)} OVERALL")
     drawing.vertical(elevation(0, 0), elevation(0, d.rear_rim_depth), 1680,
                      f"{fmt(d.rear_rim_depth)} RIM")
     drawing.vertical(elevation(-shell_half, 0), elevation(-shell_half, d.shell_depth), 1000,
@@ -155,7 +156,11 @@ def main():
     drawing.text(40, 835, "C. FRONT-TO-BACK / DEPTH VIEW (Y-Z)", 21)
     drawing.text(40, 865, "Low Y = rear; high Y = rounded front. Hidden edges are shown.")
     drawing.geometry(shape, lambda point: side(point.y, point.z))
-    drawing.vertical(side(0, 0), side(0, d.depth), 140, fmt(d.depth))
+    drawing.vertical(side(0, 0), side(0, d.overall_depth), 140,
+                     f"{fmt(d.overall_depth)} OVERALL")
+    drawing.vertical(side(d.pin_center_y, d.face_thickness),
+                     side(d.pin_center_y, d.pin_tip_depth), 600,
+                     f"{fmt(d.pin_length)} PIN ABOVE BASE")
     drawing.vertical(side(wing_front, wing_top_start), side(wing_front, d.depth), 740,
                      f"{fmt(d.hook_thickness)} TOP THICKNESS")
     drawing.vertical(side(d.height, d.face_thickness),
@@ -175,11 +180,13 @@ def main():
         "wing_projection": "Each top wing projection X",
         "height": "Maximum base height Y",
         "side_height": "Straight side edge Y",
-        "depth": "Overall depth Z",
+        "depth": "Top wing absolute Z (excluding pin)",
         "shell_width": "Shell outside width X",
         "shell_height": "Shell outside height Y",
         "shell_rear_y": "Fixed shell rear Y (base trim only)",
         "face_thickness": "Solid base thickness Z",
+        "pin_diameter": "Central pin diameter",
+        "pin_length": "Central pin length ABOVE base",
         "shell_depth": "Shell top absolute Z",
         "wall_thickness": "Shell / curved support wall thickness",
         "rear_rim_width": "Raised rear rim thickness Y",
@@ -214,17 +221,20 @@ def main():
         ("DERIVED: front support top absolute Z", d.face_thickness + d.reinforcement_height, False),
         ("DERIVED: local rear clearance Y", d.wing_rear_clearance, False),
         ("DERIVED: trunk rib height ABOVE base", d.wing_rib_height, False),
+        ("DERIVED: pin center Y (X=0)", d.pin_center_y, False),
+        ("DERIVED: pin tip absolute Z", d.pin_tip_depth, False),
+        ("DERIVED: overall depth including pin", d.overall_depth, False),
     ])
     for index, (label, value, trial) in enumerate(rows):
         y = 928 + index * 19
         color = "#aa5913" if trial else "#183047"
         drawing.text(935, y, label, 16, color)
         drawing.text(1530, y, fmt(value), 16, color)
-    drawing.text(935, 1595, "No fit tolerance or printer shrinkage allowance has been applied.", 16)
-    drawing.line((30, 1620), (1770, 1620))
-    drawing.text(40, 1652, "VERIFIED: one valid symmetric CAD solid; specified dimensions and connections pass automated checks.", 18)
-    drawing.text(40, 1682, "NOT VERIFIED: physical fit, locking action, print strength, or unmeasured curvature. This is a prototype, not a factory drawing.", 17)
-    drawing.text(40, 1712, f"Fit trial: wing span={fmt(d.wing_span)}; base width={fmt(d.face_width)}; "
+    drawing.text(935, 1695, "No fit tolerance or printer shrinkage allowance has been applied.", 16)
+    drawing.line((30, 1720), (1770, 1720))
+    drawing.text(40, 1752, "VERIFIED: one valid symmetric CAD solid; specified dimensions and connections pass automated checks.", 18)
+    drawing.text(40, 1782, "NOT VERIFIED: physical fit, locking action, print strength, or unmeasured curvature. This is a prototype, not a factory drawing.", 17)
+    drawing.text(40, 1812, f"Fit trial: wing span={fmt(d.wing_span)}; base width={fmt(d.face_width)}; "
                  f"rear rim top Z={fmt(d.rear_rim_depth)}. Verify retention and free return after printing.", 17)
     target = folder / "lumix_g6_button_dimensions.svg"
     drawing.save(target)

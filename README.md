@@ -26,11 +26,17 @@ Current owner-specified dimensions (including fit-trial adjustments):
 - **11.5 mm button base width**; the wing span is a separate measurement.
 - **5.6 mm** maximum face height along Y; **3.7 mm** side edges at both ends.
   These replace 5.7 mm and 4 mm after the first print bound in the camera.
-- 5.7 mm total front-to-back depth.
-- Two symmetric wings; no central rear protrusion.
+- Wing tips remain at **Z=5.7 mm**; total depth is now **6.1 mm** including the pin.
+- Two symmetric wings and a central cylindrical pin.
 - Centered hollow shell: **5.5 mm outside width x 5 mm outside height**.
   Its rear is fixed at **Y=0.35 mm**, rather than recentered when the base changes.
 - Solid button base thickness: **2.10 mm**.
+- **Central pin: 1.2 mm diameter and 4 mm long**, projecting into the camera
+  from the back of the solid base at **Z=2.10 mm** to **Z=6.10 mm**.
+  Its axis is at the button's midpoint, **X=0, Y=2.8 mm**, parallel to Z.
+  The pin is fused to the base, with clearance from the surrounding shell walls.
+  Diameter and length are owner-specified trial dimensions; engagement,
+  internal clearance and retention have not yet been verified.
 - The entire outside-face perimeter at **Z=0 has an R0.5 mm edge fillet**.
   This is a 3D bottom-edge round, separate from the R0.5 plan-view front
   corners. It removes material only in the bottom 0.5 mm band; the upper base
@@ -86,7 +92,7 @@ the base. Retention and free movement still require a new physical fit test.
 
 The front arc profile is a **photo-based estimate**.
 The 1.45 mm stem measurement is its X thickness,
-not its Z height; overall Z depth remains 5.7 mm.
+not its Z height; wing-tip depth remains 5.7 mm, while the pin reaches 6.1 mm.
 The rear face edge curves inward by a fit-trial value of **0.5 mm**
 at the midpoint, replacing 0.2 mm. The straight side edges run from Y=0 to Y=3.7;
 the front arc peaks at Y=5.6. The front corners retain the trial **0.5 mm radius**,
@@ -98,7 +104,8 @@ front wall facing the arched button edge. Its bulge is estimated at 0.6 mm from
 the arc endpoints to their midpoint; the 5 mm height includes this bulge.
 The inner outline is offset inward by
 0.5 mm, rather than shrinking the outline proportionally. The shell is open at
-the rear and closed by the button face at the front, with no central pin.
+the rear and closed by the button face at the front, with a central pin
+projecting from that face into the otherwise hollow cavity.
 The shell replaces the earlier, incorrect full-width rear perimeter wall.
 The wings are modelled as mirrored L-shaped hooks. The original face curvature,
 edge rounding, moulding draft and small internal details are not reproduced
@@ -153,13 +160,17 @@ PYTHONPATH=/Applications/FreeCAD.app/Contents/Resources/lib \
   /Applications/FreeCAD.app/Contents/Resources/bin/python create_drawing.py
 ```
 
-The drawing includes hidden edges as solid wireframe lines, not a hidden-line
-removed engineering projection. Dimensions are in millimetres; do not measure
+Both SVGs use FreeCAD surface projection to include curved-surface silhouettes,
+so cylinders have complete side outlines as well as circular or elliptical ends.
+Artificial surface seams are omitted. The drawing includes hidden edges as
+solid wireframe lines, not a hidden-line removed engineering projection.
+Dimensions are in millimetres; do not measure
 screen pixels or infer print scale. Its table distinguishes unmeasured trial
 values from measured/derived dimensions. It does not certify physical fit.
 
 The generator checks CAD validity, one connected solid, measured envelope,
-left/right symmetry, absence of a central rear pin, central shell dimensions,
+left/right symmetry, central pin diameter/length/position and base attachment,
+central shell dimensions and clearance around the pin,
 wall offset and hollow geometry, rear-only raised rim length/thickness/height,
 extended rear wall span/thickness/height, face end heights and rear concavity, base thickness,
 directly attached wing stems, hook thickness, symmetric 12.5 mm wing span,
@@ -173,6 +184,12 @@ and a closed, single-component STL with matching dimensions and volume.
 These checks establish geometric integrity, **not mechanical fit**.
 
 ## First print and fitting
+
+The previous print fitted and operated in the camera but fell out during
+movement. The new central pin is a retention trial, not a confirmed fix.
+It extends **0.4 mm beyond the existing wing tips**. Before installation,
+check that the camera has clearance for its full length throughout the button's
+travel; do not force it or assume that the rod alone guarantees retention.
 
 Fine-detail nylon printing or a tough engineering resin is preferable for the
 small hooks. Standard brittle resin can snap at the wing roots. Fine-nozzle FDM

@@ -12,6 +12,7 @@ import FreeCAD as App
 import Mesh
 import MeshPart
 import Part
+import TechDraw
 
 
 @dataclass(frozen=True)
@@ -26,6 +27,8 @@ class Dimensions:
     shell_height: float = 5.0
     shell_rear_y: float = 0.35
     face_thickness: float = 2.10
+    pin_diameter: float = 1.2
+    pin_length: float = 4.0
     shell_depth: float = 4.0
     wall_thickness: float = 0.5
     rear_rim_width: float = 0.45
@@ -54,6 +57,18 @@ class Dimensions:
     @property
     def overall_width(self):
         return max(self.face_width, self.wing_span)
+
+    @property
+    def pin_center_y(self):
+        return self.height / 2
+
+    @property
+    def pin_tip_depth(self):
+        return self.face_thickness + self.pin_length
+
+    @property
+    def overall_depth(self):
+        return max(self.depth, self.pin_tip_depth)
 
     @property
     def wing_rib_height(self):
@@ -201,12 +216,27 @@ def build(d):
     if rib.cut(face_envelope).Volume > 1e-6:
         raise ValueError("Half-round rib footprint extends beyond the curved button face.")
     left = right.mirror(App.Vector(0, 0, 0), App.Vector(1, 0, 0))
-    result = face.fuse(shell).fuse(right).fuse(left)
+    pin = central_pin(d)
+    cavity = Part.Face(shell_outline(d).makeOffset2D(-d.wall_thickness)).extrude(
+        App.Vector(0, 0, d.overall_depth)
+    )
+    if pin.cut(cavity).Volume > 1e-6:
+        raise ValueError("The central pin must fit inside the shell cavity without touching its walls.")
+    if len(face.fuse(pin).Solids) != 1:
+        raise ValueError("The central pin must attach directly to the button base.")
+    result = face.fuse(shell).fuse(right).fuse(left).fuse(pin)
     for reinforcement in front_reinforcements(d):
         if reinforcement.cut(face_envelope).Volume > 1e-6:
             raise ValueError("Front reinforcement extends beyond the button face.")
         result = result.fuse(reinforcement)
     return result.removeSplitter()
+
+
+def central_pin(d):
+    return Part.makeCylinder(
+        d.pin_diameter / 2, d.pin_length,
+        App.Vector(0, d.pin_center_y, d.face_thickness),
+    )
 
 
 def wing_rib(d):
@@ -280,26 +310,34 @@ def check_shape(shape, d):
         raise RuntimeError("Expected one valid, connected solid with positive volume.")
     bounds = shape.optimalBoundingBox(False, False)
     actual = (bounds.XLength, bounds.YLength, bounds.ZLength)
-    expected = (d.overall_width, d.height, d.depth)
+    expected = (d.overall_width, d.height, d.overall_depth)
     if any(abs(a - b) > 1e-6 for a, b in zip(actual, expected)):
         raise RuntimeError(f"Wrong bounding dimensions: {actual}, expected {expected}.")
     mirrored = shape.mirror(App.Vector(0, 0, 0), App.Vector(1, 0, 0))
     if shape.cut(mirrored).Volume + mirrored.cut(shape).Volume > 1e-6:
         raise RuntimeError("The reconstructed wings are not symmetric.")
-    center_probe = Part.makeBox(
-        1, 1, d.depth, App.Vector(-0.5, d.height / 2 - 0.5, d.face_thickness)
+    pin = central_pin(d)
+    pin_region = Part.makeBox(
+        d.pin_diameter, d.pin_diameter, d.overall_depth,
+        App.Vector(-d.pin_diameter / 2, d.pin_center_y - d.pin_diameter / 2,
+                   d.face_thickness),
     )
-    if shape.common(center_probe).Volume > 1e-6:
-        raise RuntimeError("The central rear cavity must not contain a pin.")
+    actual_pin = shape.common(pin_region)
+    if (actual_pin.cut(pin).Volume + pin.cut(actual_pin).Volume > 1e-6):
+        raise RuntimeError("Central pin must have the specified diameter, length and base attachment.")
+    if abs(actual_pin.Volume - pi * (d.pin_diameter / 2)**2 * d.pin_length) > 1e-6:
+        raise RuntimeError("Central pin volume differs from the specified cylinder.")
+    without_pin = shape.cut(pin)
     region = Part.makeBox(
-        d.wing_inner_gap, d.height, d.depth,
+        d.wing_inner_gap, d.height, d.overall_depth,
         App.Vector(-d.wing_inner_gap / 2, 0, d.face_thickness),
     )
     actual_shell = shape.common(region)
-    expected_shell = central_shell(d).common(region)
+    expected_shell = central_shell(d).fuse(pin).common(region)
     if (actual_shell.cut(expected_shell).Volume
             + expected_shell.cut(actual_shell).Volume > 1e-6):
-        raise RuntimeError("Central shell differs from its specified hollow geometry.")
+        raise RuntimeError("Central shell and pin differ from their specified geometry.")
+    actual_shell = actual_shell.cut(pin)
     shell_bounds = actual_shell.BoundBox
     for actual, expected in zip(
         (shell_bounds.XLength, shell_bounds.YLength, shell_bounds.ZMax),
@@ -392,7 +430,7 @@ def check_shape(shape, d):
         d.depth - d.hook_thickness - d.rear_rim_depth,
         App.Vector(-d.wing_inner_gap / 2 - d.wing_stem_width, 0, d.rear_rim_depth),
     )
-    stems = sorted(shape.common(stem_region).Solids, key=lambda solid: solid.BoundBox.XMin)
+    stems = sorted(without_pin.common(stem_region).Solids, key=lambda solid: solid.BoundBox.XMin)
     if len(stems) != 2:
         raise RuntimeError("Expected two separate stems above the shell and rear rim.")
     if abs(stems[1].BoundBox.XMin - stems[0].BoundBox.XMax - d.wing_inner_gap) > 1e-6:
@@ -414,7 +452,7 @@ def check_shape(shape, d):
         d.wing_span, d.height, d.hook_thickness,
         App.Vector(-d.wing_span / 2, 0, d.depth - d.hook_thickness),
     )
-    top_wings = shape.common(wing_region)
+    top_wings = without_pin.common(wing_region)
     if abs(top_wings.BoundBox.XLength - d.wing_span) > 1e-6:
         raise RuntimeError("Top wing span differs from the shell width plus both projections.")
     if (abs(top_wings.BoundBox.XMin + d.wing_span / 2) > 1e-6
@@ -466,6 +504,42 @@ def check_shape(shape, d):
             raise RuntimeError("Curved reinforcement must connect to its wing stem.")
 
 
+def wireframe_polylines(shape, project):
+    origin = project(App.Vector(0, 0, 0))
+    basis = [project(axis) for axis in (
+        App.Vector(1, 0, 0), App.Vector(0, 1, 0), App.Vector(0, 0, 1)
+    )]
+    horizontal = App.Vector(*(point[0] - origin[0] for point in basis))
+    vertical = App.Vector(*(point[1] - origin[1] for point in basis))
+    scale_x, scale_y = horizontal.Length, vertical.Length
+    if min(scale_x, scale_y) <= 0:
+        raise ValueError("Wireframe projection must have two nonzero axes.")
+    horizontal.normalize()
+    vertical.normalize()
+    if abs(horizontal.dot(vertical)) > 1e-6:
+        raise ValueError("Wireframe projection axes must be orthogonal.")
+    normal = horizontal.cross(vertical)
+    rotation = App.Matrix(
+        horizontal.x, horizontal.y, horizontal.z, 0,
+        vertical.x, vertical.y, vertical.z, 0,
+        normal.x, normal.y, normal.z, 0,
+        0, 0, 0, 1,
+    )
+    rotated = shape.copy()
+    rotated.transformShape(rotation)
+    projected = TechDraw.projectEx(rotated, App.Vector(0, 0, 1))
+    # Include visible and hidden silhouettes, but not artificial surface seams.
+    for index in (0, 1, 3, 4, 5, 6, 8, 9):
+        for edge in projected[index].Edges:
+            points = [
+                (origin[0] + point.x * scale_x, origin[1] + point.y * scale_y)
+                for point in edge.discretize(Deflection=0.002)
+            ]
+            if max(abs(x - points[0][0]) + abs(y - points[0][1])
+                   for x, y in points) >= 0.001:
+                yield points
+
+
 def write_preview(shape, target):
     bounds = shape.optimalBoundingBox(False, False)
     panels = [
@@ -486,11 +560,11 @@ def write_preview(shape, target):
     ]
     for index, (label, project) in enumerate(panels):
         content.append(f'<text x="{25 + index * 355}" y="104" font-size="14">{label}</text>')
-        for edge in shape.Edges:
-            points = []
-            for point in edge.discretize(Deflection=0.025):
-                x, y = project(point)
-                points.append(f"{195 + index * 355 + x * 23:.3f},{295 + y * 23:.3f}")
+        for polyline in wireframe_polylines(shape, project):
+            points = [
+                f"{195 + index * 355 + x * 23:.3f},{295 + y * 23:.3f}"
+                for x, y in polyline
+            ]
             content.append(
                 f'<polyline points="{" ".join(points)}" fill="none" '
                 'stroke="#276a97" stroke-width="1.2"/>'
@@ -520,6 +594,7 @@ def main():
     for name, value in vars(d).items():
         measured = ("face_width", "wing_projection", "height", "depth", "shell_width",
                     "shell_height", "shell_rear_y", "shell_depth", "wall_thickness", "face_thickness",
+                    "pin_diameter", "pin_length",
                     "rear_rim_width", "rear_rim_length", "rear_wall_length", "side_height",
                     "rear_rim_depth", "wing_stem_width", "wing_inner_gap",
                     "wing_rear_y", "wing_height", "hook_thickness",
@@ -544,7 +619,7 @@ def main():
     mesh_bounds = reloaded.BoundBox
     for actual, expected in zip(
         (mesh_bounds.XLength, mesh_bounds.YLength, mesh_bounds.ZLength),
-        (d.overall_width, d.height, d.depth),
+        (d.overall_width, d.height, d.overall_depth),
     ):
         if abs(actual - expected) > 0.02:
             raise RuntimeError("Exported STL dimensions exceed 0.02 mm tolerance.")
@@ -553,7 +628,9 @@ def main():
     App.closeDocument(document.Name)
     print(f"Verified CAD and STEP: one valid symmetric solid, {shape.Volume:.3f} mm^3.")
     print(f"Verified STL: one closed component, {reloaded.CountFacets} triangles.")
-    print(f"Envelope: {d.overall_width} x {d.height} x {d.depth} mm; base width {d.face_width} mm.")
+    print(f"Envelope: {d.overall_width} x {d.height} x {d.overall_depth} mm; base width {d.face_width} mm.")
+    print(f"Central pin: diameter {d.pin_diameter} mm, length {d.pin_length} mm above base; "
+          f"tip Z={d.pin_tip_depth} mm.")
     print(f"Wing span: {d.wing_span} mm; front corner radius: {d.front_corner_radius} mm.")
     print(f"Files written to {args.output_dir}. Physical fit remains unverified.")
 
